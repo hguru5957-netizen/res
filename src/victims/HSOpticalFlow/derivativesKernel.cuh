@@ -130,4 +130,6 @@ void ComputeDerivatives(cudaStream_t stream, const float *I0, const float *I1,
     checkCudaErrors(cudaCreateTextureObject(&texTarget, &texRes, &texDescr, NULL));
 
     ComputeDerivativesKernel<<<blocks, threads, 0, stream>>>(w, h, s, Ix, Iy, Iz, texSource, texTarget);
+    cudaDestroyTextureObject(texSource);
+    cudaDestroyTextureObject(texTarget);
 }

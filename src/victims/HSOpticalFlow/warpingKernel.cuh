@@ -87,4 +87,5 @@ void WarpImage(cudaStream_t stream, const float *src, int w, int h, int s,
     checkCudaErrors(cudaCreateTextureObject(&texToWarp, &texRes, &texDescr, NULL));
 
     WarpingKernel<<<blocks, threads, 0, stream>>>(w, h, s, u, v, out, texToWarp);
+    cudaDestroyTextureObject(texToWarp);
 }

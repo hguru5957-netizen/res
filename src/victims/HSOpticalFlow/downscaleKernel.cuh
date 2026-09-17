@@ -83,4 +83,5 @@ void Downscale(cudaStream_t stream, const float *src, int width, int height, int
     checkCudaErrors(cudaCreateTextureObject(&texFine, &texRes, &texDescr, NULL));
 
     DownscaleKernel<<<blocks, threads, 0, stream>>>(newWidth, newHeight, newStride, out, texFine);
+    cudaDestroyTextureObject(texFine);
 }

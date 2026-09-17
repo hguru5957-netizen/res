@@ -142,8 +142,8 @@ int main(int argc, char** argv)
     uint64_t disable_mask_A = ~tpcs_for_gpc[0];
     uint64_t disable_mask_B = ~tpcs_for_gpc[1];
 
-    //libsmctrl_set_stream_mask(streamA, disable_mask_A);
-    //libsmctrl_set_stream_mask(streamB, disable_mask_B);
+    libsmctrl_set_stream_mask(streamA, disable_mask_A);
+    libsmctrl_set_stream_mask(streamB, disable_mask_B);
 
     cudaEvent_t startA;
     cudaEvent_t stopA;

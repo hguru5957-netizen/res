@@ -80,4 +80,5 @@ void Upscale(cudaStream_t stream, const float *src, int width, int height, int s
     checkCudaErrors(cudaCreateTextureObject(&texCoarse, &texRes, &texDescr, NULL));
 
     UpscaleKernel<<<blocks, threads, 0, stream>>>(newWidth, newHeight, newStride, scale, out, texCoarse);
+    cudaDestroyTextureObject(texCoarse);
 }
