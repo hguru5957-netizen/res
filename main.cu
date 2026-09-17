@@ -9,6 +9,7 @@
 #include "victims.cuh"
 #include "enemies.cuh"
 #include "hsOpticalFlow.h"
+#include "yolo.h"
 
 #define CUDA_CHECK(call) \
     do { \
@@ -24,39 +25,26 @@
 void launch_task(int id, cudaStream_t stream,
                  float* d_A, float* d_B, float* d_C,
                  int allocated_sms,
-                 HSOFWorkspace* hsWs)
+                 HSOFWorkspace* hsWs,
+                 YoloWorkspace* yWs)
 {
     switch (id) {
-        case 1:
-            launch_matrixMul(stream, d_A, d_B, d_C);
-            break;
-        case 2:
-            launch_vectorAdd(stream, d_A, d_B, d_C, 50000);
-            break;
+        case 1: launch_matrixMul(stream, d_A, d_B, d_C); break;
+        case 2: launch_vectorAdd(stream, d_A, d_B, d_C, 50000); break;
         case 3:
-            launch_stereoDisparity(
-                stream,
+            launch_stereoDisparity(stream,
                 reinterpret_cast<unsigned int*>(d_A),
                 reinterpret_cast<unsigned int*>(d_B),
-                reinterpret_cast<unsigned int*>(d_C)
-            );
+                reinterpret_cast<unsigned int*>(d_C));
             break;
-        case 4:
-            launch_stress_compute(stream, 2000000000ULL, allocated_sms);
-            break;
+        case 4: launch_stress_compute(stream, 2000000000ULL, allocated_sms); break;
         case 5:
-            launch_stress_memory(
-                stream,
+            launch_stress_memory(stream,
                 reinterpret_cast<unsigned int*>(d_A),
-                16 * 1024 * 1024,
-                128,
-                2000000000ULL,
-                allocated_sms
-            );
+                16 * 1024 * 1024, 128, 2000000000ULL, allocated_sms);
             break;
-        case 6:
-            launch_hsOpticalFlow(stream, d_A, d_B, d_C, hsWs);
-            break;
+        case 6: launch_hsOpticalFlow(stream, d_A, d_B, d_C, hsWs); break;
+        case 7: launch_yolo(stream, yWs); break;
         default:
             std::cerr << "Invalid Task ID: " << id << std::endl;
             exit(EXIT_FAILURE);
@@ -91,7 +79,6 @@ int main(int argc, char** argv)
 
     cudaStream_t streamA;
     cudaStream_t streamB;
-
     CUDA_CHECK(cudaStreamCreate(&streamA));
     CUDA_CHECK(cudaStreamCreate(&streamB));
 
@@ -99,6 +86,17 @@ int main(int argc, char** argv)
     HSOFWorkspace* hsWsB = hsOFWorkspaceCreate();
     if (!hsWsA || !hsWsB) {
         std::cerr << "Failed to create HSOpticalFlow workspace" << std::endl;
+        return EXIT_FAILURE;
+    }
+
+    // ---- YOLO workspaces -------------------------------------------------
+    const char* YOLO_CFG     = "src/victims/darknet/cfg/tiny-yolo-voc.cfg";
+    const char* YOLO_WEIGHTS = "src/victims/darknet/yolov2-tiny-voc.weights";
+
+    YoloWorkspace* yWsA = yoloWorkspaceCreate(YOLO_CFG, YOLO_WEIGHTS);
+    YoloWorkspace* yWsB = yoloWorkspaceCreate(YOLO_CFG, YOLO_WEIGHTS);
+    if (!yWsA || !yWsB) {
+        std::cerr << "Failed to create Yolo workspace" << std::endl;
         return EXIT_FAILURE;
     }
 
@@ -112,16 +110,14 @@ int main(int argc, char** argv)
 
         hsOFWorkspaceDestroy(hsWsA);
         hsOFWorkspaceDestroy(hsWsB);
+        yoloWorkspaceDestroy(yWsA);
+        yoloWorkspaceDestroy(yWsB);
 
         cudaStreamDestroy(streamA);
         cudaStreamDestroy(streamB);
 
-        cudaFree(d_bufA);
-        cudaFree(d_bufB);
-        cudaFree(d_bufC);
-        cudaFree(d_bufD);
-        cudaFree(d_bufE);
-        cudaFree(d_bufF);
+        cudaFree(d_bufA); cudaFree(d_bufB); cudaFree(d_bufC);
+        cudaFree(d_bufD); cudaFree(d_bufE); cudaFree(d_bufF);
 
         return EXIT_FAILURE;
     }
@@ -145,11 +141,7 @@ int main(int argc, char** argv)
     libsmctrl_set_stream_mask(streamA, disable_mask_A);
     libsmctrl_set_stream_mask(streamB, disable_mask_B);
 
-    cudaEvent_t startA;
-    cudaEvent_t stopA;
-    cudaEvent_t startB;
-    cudaEvent_t stopB;
-
+    cudaEvent_t startA, stopA, startB, stopB;
     CUDA_CHECK(cudaEventCreate(&startA));
     CUDA_CHECK(cudaEventCreate(&stopA));
     CUDA_CHECK(cudaEventCreate(&startB));
@@ -163,21 +155,21 @@ int main(int argc, char** argv)
     std::vector<float> corun_B(num_trials);
 
     for (int i = 0; i < 3; i++) {
-        launch_task(taskA, streamA, d_bufA, d_bufB, d_bufC, sms_in_gpc0, hsWsA);
-        launch_task(taskB, streamB, d_bufD, d_bufE, d_bufF, sms_in_gpc1, hsWsB);
+        launch_task(taskA, streamA, d_bufA, d_bufB, d_bufC, sms_in_gpc0, hsWsA, yWsA);
+        launch_task(taskB, streamB, d_bufD, d_bufE, d_bufF, sms_in_gpc1, hsWsB, yWsB);
     }
 
     CUDA_CHECK(cudaDeviceSynchronize());
 
     for (int i = 0; i < num_trials; i++) {
         CUDA_CHECK(cudaEventRecord(startA, streamA));
-        launch_task(taskA, streamA, d_bufA, d_bufB, d_bufC, sms_in_gpc0, hsWsA);
+        launch_task(taskA, streamA, d_bufA, d_bufB, d_bufC, sms_in_gpc0, hsWsA, yWsA);
         CUDA_CHECK(cudaEventRecord(stopA, streamA));
         CUDA_CHECK(cudaEventSynchronize(stopA));
         CUDA_CHECK(cudaEventElapsedTime(&solo_A[i], startA, stopA));
 
         CUDA_CHECK(cudaEventRecord(startB, streamB));
-        launch_task(taskB, streamB, d_bufD, d_bufE, d_bufF, sms_in_gpc1, hsWsB);
+        launch_task(taskB, streamB, d_bufD, d_bufE, d_bufF, sms_in_gpc1, hsWsB, yWsB);
         CUDA_CHECK(cudaEventRecord(stopB, streamB));
         CUDA_CHECK(cudaEventSynchronize(stopB));
         CUDA_CHECK(cudaEventElapsedTime(&solo_B[i], startB, stopB));
@@ -185,11 +177,11 @@ int main(int argc, char** argv)
 
     for (int i = 0; i < num_trials; i++) {
         CUDA_CHECK(cudaEventRecord(startB, streamB));
-        launch_task(taskB, streamB, d_bufD, d_bufE, d_bufF, sms_in_gpc1, hsWsB);
+        launch_task(taskB, streamB, d_bufD, d_bufE, d_bufF, sms_in_gpc1, hsWsB, yWsB);
         CUDA_CHECK(cudaEventRecord(stopB, streamB));
 
         CUDA_CHECK(cudaEventRecord(startA, streamA));
-        launch_task(taskA, streamA, d_bufA, d_bufB, d_bufC, sms_in_gpc0, hsWsA);
+        launch_task(taskA, streamA, d_bufA, d_bufB, d_bufC, sms_in_gpc0, hsWsA, yWsA);
         CUDA_CHECK(cudaEventRecord(stopA, streamA));
 
         CUDA_CHECK(cudaDeviceSynchronize());
@@ -203,17 +195,12 @@ int main(int argc, char** argv)
     std::sort(corun_B.begin(), corun_B.end());
 
     int median_index = num_trials / 2;
-
     float time_A_solo = solo_A[median_index];
     float time_B_solo = solo_B[median_index];
 
     int p90_index = static_cast<int>(std::ceil(0.90 * num_trials)) - 1;
-
-    if (p90_index < 0)
-        p90_index = 0;
-
-    if (p90_index >= num_trials)
-        p90_index = num_trials - 1;
+    if (p90_index < 0) p90_index = 0;
+    if (p90_index >= num_trials) p90_index = num_trials - 1;
 
     float time_A_corun = corun_A[p90_index];
     float time_B_corun = corun_B[p90_index];
@@ -222,25 +209,20 @@ int main(int argc, char** argv)
     float ratio_B = time_B_corun / time_B_solo;
 
     std::cout
-        << std::fixed
-        << std::setprecision(4)
-        << taskA << ","
-        << taskB << ","
-        << time_A_solo << ","
-        << time_A_corun << ","
-        << ratio_A << ","
-        << time_B_solo << ","
-        << time_B_corun << ","
-        << ratio_B << "\n";
+        << std::fixed << std::setprecision(4)
+        << taskA << "," << taskB << ","
+        << time_A_solo << "," << time_A_corun << "," << ratio_A << ","
+        << time_B_solo << "," << time_B_corun << "," << ratio_B << "\n";
 
     hsOFWorkspaceDestroy(hsWsA);
     hsOFWorkspaceDestroy(hsWsB);
+    yoloWorkspaceDestroy(yWsA);
+    yoloWorkspaceDestroy(yWsB);
 
     CUDA_CHECK(cudaEventDestroy(startA));
     CUDA_CHECK(cudaEventDestroy(stopA));
     CUDA_CHECK(cudaEventDestroy(startB));
     CUDA_CHECK(cudaEventDestroy(stopB));
-
     CUDA_CHECK(cudaStreamDestroy(streamA));
     CUDA_CHECK(cudaStreamDestroy(streamB));
 
