@@ -8,6 +8,7 @@
 #include <cstdint>
 #include "victims.cuh"
 #include "enemies.cuh"
+#include "hsOpticalFlow.h"
 
 #define CUDA_CHECK(call) \
     do { \
@@ -20,7 +21,10 @@
         } \
     } while (0)
 
-void launch_task(int id, cudaStream_t stream, float* d_A, float* d_B, float* d_C, int allocated_sms)
+void launch_task(int id, cudaStream_t stream,
+                 float* d_A, float* d_B, float* d_C,
+                 int allocated_sms,
+                 HSOFWorkspace* hsWs)
 {
     switch (id) {
         case 1:
@@ -49,6 +53,9 @@ void launch_task(int id, cudaStream_t stream, float* d_A, float* d_B, float* d_C
                 2000000000ULL,
                 allocated_sms
             );
+            break;
+        case 6:
+            launch_hsOpticalFlow(stream, d_A, d_B, d_C, hsWs);
             break;
         default:
             std::cerr << "Invalid Task ID: " << id << std::endl;
@@ -88,6 +95,13 @@ int main(int argc, char** argv)
     CUDA_CHECK(cudaStreamCreate(&streamA));
     CUDA_CHECK(cudaStreamCreate(&streamB));
 
+    HSOFWorkspace* hsWsA = hsOFWorkspaceCreate();
+    HSOFWorkspace* hsWsB = hsOFWorkspaceCreate();
+    if (!hsWsA || !hsWsB) {
+        std::cerr << "Failed to create HSOpticalFlow workspace" << std::endl;
+        return EXIT_FAILURE;
+    }
+
     uint32_t num_gpcs = 0;
     uint64_t* tpcs_for_gpc = nullptr;
 
@@ -95,6 +109,9 @@ int main(int argc, char** argv)
 
     if (num_gpcs < 2) {
         std::cerr << "Error: Not enough GPCs to partition!" << std::endl;
+
+        hsOFWorkspaceDestroy(hsWsA);
+        hsOFWorkspaceDestroy(hsWsB);
 
         cudaStreamDestroy(streamA);
         cudaStreamDestroy(streamB);
@@ -146,21 +163,21 @@ int main(int argc, char** argv)
     std::vector<float> corun_B(num_trials);
 
     for (int i = 0; i < 3; i++) {
-        launch_task(taskA, streamA, d_bufA, d_bufB, d_bufC, sms_in_gpc0);
-        launch_task(taskB, streamB, d_bufD, d_bufE, d_bufF, sms_in_gpc1);
+        launch_task(taskA, streamA, d_bufA, d_bufB, d_bufC, sms_in_gpc0, hsWsA);
+        launch_task(taskB, streamB, d_bufD, d_bufE, d_bufF, sms_in_gpc1, hsWsB);
     }
 
     CUDA_CHECK(cudaDeviceSynchronize());
 
     for (int i = 0; i < num_trials; i++) {
         CUDA_CHECK(cudaEventRecord(startA, streamA));
-        launch_task(taskA, streamA, d_bufA, d_bufB, d_bufC, sms_in_gpc0);
+        launch_task(taskA, streamA, d_bufA, d_bufB, d_bufC, sms_in_gpc0, hsWsA);
         CUDA_CHECK(cudaEventRecord(stopA, streamA));
         CUDA_CHECK(cudaEventSynchronize(stopA));
         CUDA_CHECK(cudaEventElapsedTime(&solo_A[i], startA, stopA));
 
         CUDA_CHECK(cudaEventRecord(startB, streamB));
-        launch_task(taskB, streamB, d_bufD, d_bufE, d_bufF, sms_in_gpc1);
+        launch_task(taskB, streamB, d_bufD, d_bufE, d_bufF, sms_in_gpc1, hsWsB);
         CUDA_CHECK(cudaEventRecord(stopB, streamB));
         CUDA_CHECK(cudaEventSynchronize(stopB));
         CUDA_CHECK(cudaEventElapsedTime(&solo_B[i], startB, stopB));
@@ -168,11 +185,11 @@ int main(int argc, char** argv)
 
     for (int i = 0; i < num_trials; i++) {
         CUDA_CHECK(cudaEventRecord(startB, streamB));
-        launch_task(taskB, streamB, d_bufD, d_bufE, d_bufF, sms_in_gpc1);
+        launch_task(taskB, streamB, d_bufD, d_bufE, d_bufF, sms_in_gpc1, hsWsB);
         CUDA_CHECK(cudaEventRecord(stopB, streamB));
 
         CUDA_CHECK(cudaEventRecord(startA, streamA));
-        launch_task(taskA, streamA, d_bufA, d_bufB, d_bufC, sms_in_gpc0);
+        launch_task(taskA, streamA, d_bufA, d_bufB, d_bufC, sms_in_gpc0, hsWsA);
         CUDA_CHECK(cudaEventRecord(stopA, streamA));
 
         CUDA_CHECK(cudaDeviceSynchronize());
@@ -215,6 +232,9 @@ int main(int argc, char** argv)
         << time_B_solo << ","
         << time_B_corun << ","
         << ratio_B << "\n";
+
+    hsOFWorkspaceDestroy(hsWsA);
+    hsOFWorkspaceDestroy(hsWsB);
 
     CUDA_CHECK(cudaEventDestroy(startA));
     CUDA_CHECK(cudaEventDestroy(stopA));

@@ -4,6 +4,9 @@ NVCC = nvcc
 NVCC_FLAGS = -O3 -arch=sm_87 \
              -Iinclude \
              -Ilibsmctrl \
+             -Isrc/victims \
+             -Isrc/victims/HSOpticalFlow \
+             -I/usr/local/cuda-11.4/samples/common/inc \
              -I/usr/local/cuda-11.4/samples/3_Imaging/stereoDisparity
 
 LDFLAGS = -Llibsmctrl -lsmctrl -lcuda -lcudart
@@ -12,6 +15,8 @@ SRCS = main.cu \
        src/victims/matrixMul.cu \
        src/victims/vectorAdd.cu \
        src/victims/stereoDisparity.cu \
+       src/victims/hsOpticalFlow.cu \
+       src/victims/HSOpticalFlow/flowCUDA.cu \
        src/enemies/stress_compute.cu \
        src/enemies/stress_memory.cu
 
