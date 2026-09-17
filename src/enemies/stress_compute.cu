@@ -26,7 +26,7 @@ __global__ void computeKernel_INT32(unsigned long long run_time) {
 // ---------------------------------------------------------
 // allocated_sms defaults to 8 (1 GPC on Orin), but can be adjusted 
 // if your partition size changes.
-void launch_stress_compute(cudaStream_t stream, unsigned long long run_time, int allocated_sms = 8) {
+void launch_stress_compute(cudaStream_t stream, unsigned long long run_time, int allocated_sms) {
     // Launch 2 full blocks per allocated SM to guarantee even WDU distribution
     dim3 blocks(allocated_sms * 2); 
     // MAXIMIZE: 1024 threads (32 warps) per block to saturate the SM compute units

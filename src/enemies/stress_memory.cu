@@ -24,7 +24,7 @@ __global__ void memoryKernel_Write(unsigned int *k_data, int num_lines, unsigned
 // ---------------------------------------------------------
 // allocated_sms defaults to 8 (1 GPC on Orin), but can be adjusted 
 // if your partition size changes.
-void launch_stress_memory(cudaStream_t stream, unsigned int* device_array, int bytesize, int stride_bytes, unsigned long long run_time, int allocated_sms = 8) {
+void launch_stress_memory(cudaStream_t stream, unsigned int* device_array, int bytesize, int stride_bytes, unsigned long long run_time, int allocated_sms) {
     int num_lines = bytesize / stride_bytes; 
     
     // Launch 2 full blocks per allocated SM to guarantee even WDU distribution
